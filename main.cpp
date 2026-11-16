@@ -1,4 +1,4 @@
-// DisasterScape - Natural Disaster Simulator (Flood + Earthquake)
+// DisasterScape - Natural Disaster Simulator ( Mode - NORMAL, FLOOD, EARTHQUAKE, DROUGHT)
 #include <GL/freeglut.h>
 #include <cmath>
 #include <cstdio>
@@ -9,19 +9,21 @@
 using namespace std;
 
 const float PI = 3.14159265f;
-enum Disaster { NORMAL, FLOOD, EARTHQUAKE };
-enum PType { RAIN, DEBRIS };
+
+enum Disaster { NORMAL, FLOOD, EARTHQUAKE, DROUGHT };
+enum PType { RAIN, DEBRIS, LEAF };
 struct Particle { float x, y, z, vx, vy, vz, life, size; PType type; };
 struct Building { float x, z, w, h, d, r, g, b; };
 struct Crack { vector<float> x, z; };
 
 Disaster current = NORMAL;
 bool paused = false;
-float simTime = 0, cloudOff = 0;
+float simTime = 0, flashAmt = 0, cloudOff = 0;
 float camAngle = 25, camHeight = 14, camDist = 42;
 int winW = 1000, winH = 650;
 vector<Particle> parts;
 vector<Crack> cracks;
+vector<float> bolt;
 
 const int NB = 5;
 Building blds[NB] = {
@@ -32,9 +34,9 @@ Building blds[NB] = {
     {9, 10, 5, 9, 5, 0.50f, 0.70f, 0.60f}};
 const int NT = 7;
 float treePos[NT][2] = {{-22,-4},{-8,5},{3,7},{16,-5},{22,6},{-2,-18},{12,-16}};
-const char* names[] = {"Normal", "Flood", "Earthquake"};
+const char* names[] = {"Normal", "Flood", "Earthquake", "Drought"};
 
-// ---------- helpers ----------
+// ---------- helper functions ----------
 float frand(float a, float b) { return a + (b - a) * (rand() / (float)RAND_MAX); }
 float lerpf(float a, float b, float t) { return a + (b - a) * t; }
 float clamp01(float v) { return v < 0 ? 0 : (v > 1 ? 1 : v); }
@@ -46,10 +48,11 @@ void addP(PType t, float x, float y, float z, float vx, float vy, float vz, floa
 }
 
 void resetSim() {
-    simTime = 0;
-    parts.clear();
+    simTime = 0; flashAmt = 0;
+    parts.clear(); bolt.clear();
 }
 
+// EARTHQUAKE: ground crack points create kore.
 void initCracks() {
     for (int i = 0; i < 22; i++) {
         Crack c;
@@ -63,9 +66,12 @@ void initCracks() {
 }
 
 // ---------- scene objects ----------
+
+// GROUND: DROUGHT
 void drawGround() {
     float k = prog();
     float r = 0.25f, g = 0.62f, b = 0.22f;
+    if (current == DROUGHT) { r = lerpf(r, 0.78f, k); g = lerpf(g, 0.65f, k); b = lerpf(b, 0.38f, k); }
     if (current == FLOOD) { r *= 1 - 0.2f * k; g *= 1 - 0.2f * k; b *= 1 - 0.2f * k; }
     glNormal3f(0, 1, 0);
     glColor3f(r, g, b);
@@ -86,8 +92,10 @@ void drawGround() {
     glEnd();
 }
 
+// POND: DROUGHT-e pukurer pani kome jay.
 void drawPond() {
-    float R = 6.0f;
+    float k = prog();
+    float R = 6.0f * (current == DROUGHT ? 1 - 0.85f * k : 1.0f);
     glNormal3f(0, 1, 0);
     glColor3f(0.2f, 0.5f, 0.85f);
     glBegin(GL_TRIANGLE_FAN);
@@ -101,7 +109,8 @@ void drawPond() {
 
 void drawCracks() {
     float p = 0;
-    if (current == EARTHQUAKE && simTime > 2) p = clamp01((simTime - 2) / 3);
+    if (current == DROUGHT) p = prog();
+    else if (current == EARTHQUAKE && simTime > 2) p = clamp01((simTime - 2) / 3);
     if (p <= 0) return;
     glDisable(GL_LIGHTING);
     glColor3f(0.2f, 0.13f, 0.07f);
@@ -115,17 +124,24 @@ void drawCracks() {
     glEnable(GL_LIGHTING);
 }
 
+// DROUGHT: gach-er pata color change
 void drawTree(float x, float z, int idx) {
+    float k = prog();
+    float dry = (current == DROUGHT) ? k : 0;
     glPushMatrix();
     glTranslatef(x, 0, z);
     glColor3f(0.4f, 0.26f, 0.10f);
     glPushMatrix(); glTranslatef(0, 1.2f, 0); glScalef(0.5f, 2.4f, 0.5f); glutSolidCube(1); glPopMatrix();
-    glColor3f(0.10f, 0.50f, 0.15f);
+    float fr = lerpf(0.10f, 0.60f, dry);
+    float fg = 0.50f;
+    float fb = 0.15f;
+    glColor3f(fr, fg, fb);
     glPushMatrix(); glTranslatef(0, 2.2f, 0); glRotatef(-90, 1, 0, 0); glutSolidCone(2.0, 4.0, 12, 2); glPopMatrix();
     glPushMatrix(); glTranslatef(0, 4.2f, 0); glRotatef(-90, 1, 0, 0); glutSolidCone(1.5, 3.0, 12, 2); glPopMatrix();
     glPopMatrix();
 }
 
+// EARTHQUAKE: building shake, tilt and wall crack.
 void drawBuilding(const Building& b, int idx) {
     float shake = 0, tilt = 0;
     if (current == EARTHQUAKE) {
@@ -133,12 +149,13 @@ void drawBuilding(const Building& b, int idx) {
         shake = sinf(simTime * 40 + idx) * 0.15f * a;       // TRANSLATION
         tilt = sinf(simTime * 25 + idx * 2) * 2.0f * a;     // ROTATION
     }
+    float cr = b.r, cg = b.g, cb = b.b;
     glPushMatrix();
     glTranslatef(b.x + shake, 0, b.z);
     glRotatef(tilt, 0, 0, 1);
-    glColor3f(b.r, b.g, b.b);
+    glColor3f(cr, cg, cb);
     glPushMatrix(); glTranslatef(0, b.h / 2, 0); glScalef(b.w, b.h, b.d); glutSolidCube(1); glPopMatrix();   // SCALING
-    glColor3f(b.r * 0.6f, b.g * 0.6f, b.b * 0.6f);
+    glColor3f(cr * 0.6f, cg * 0.6f, cb * 0.6f);
     glPushMatrix(); glTranslatef(0, b.h + 0.2f, 0); glScalef(b.w + 0.4f, 0.4f, b.d + 0.4f); glutSolidCube(1); glPopMatrix();
     glDisable(GL_LIGHTING);
     bool lit = (current == FLOOD);
@@ -166,9 +183,11 @@ void drawBuilding(const Building& b, int idx) {
     glPopMatrix();
 }
 
+// FLOOD: dark big cloud
 void drawClouds() {
     float k = prog();
-    float c = (current == FLOOD) ? lerpf(1.0f, 0.5f, k) : 1.0f;
+    float tgt = current == FLOOD ? 0.5f : 1.0f;
+    float c = lerpf(1.0f, tgt, k);
     float sc = (current == FLOOD) ? 1 + 0.5f * k : 1;
     float bx[5] = {-40, -15, 10, 35, 55}, bz[5] = {-25, -10, -30, 5, -18}, by[5] = {26, 29, 25, 28, 27};
     glColor3f(c, c, c);
@@ -184,17 +203,21 @@ void drawClouds() {
     }
 }
 
+// DROUGHT: sun er color change hoise
 void drawSun() {
     if (current == FLOOD) return;
+    float k = prog();
     glDisable(GL_LIGHTING);
-    glColor3f(1.0f, 0.9f, 0.3f);
+    if (current == DROUGHT) glColor3f(1.0f, lerpf(0.9f, 0.5f, k), 0.2f);
+    else glColor3f(1.0f, 0.9f, 0.3f);
     glPushMatrix();
     glTranslatef(30, 30, -45);
-    glutSolidSphere(3, 16, 16);
+    glutSolidSphere(3 + (current == DROUGHT ? 2 * k : 0), 16, 16);
     glPopMatrix();
     glEnable(GL_LIGHTING);
 }
 
+// FLOOD FEATURE
 void drawFloodWater() {
     float wy = min(simTime * 0.4f, 4.5f);              // pani er level barche
     // vasha jinis (opaque, tai age)
@@ -219,6 +242,7 @@ void drawFloodWater() {
     glEnable(GL_LIGHTING);
 }
 
+// Particle: rain, debris, dry leaf.
 void drawParticles() {
     glDisable(GL_LIGHTING);
     glEnable(GL_POINT_SMOOTH);
@@ -234,9 +258,9 @@ void drawParticles() {
     glEnd();
     for (size_t i = 0; i < parts.size(); i++) {
         const Particle& p = parts[i];
-        if (p.type != DEBRIS) continue;
-        glColor4f(0.4f, 0.38f, 0.34f, 1);
-        glPointSize(5);
+        if (p.type == RAIN) continue;
+        if (p.type == DEBRIS) { glColor4f(0.4f, 0.38f, 0.34f, 1); glPointSize(5); }
+        else { glColor4f(0.65f, 0.45f, 0.15f, 1); glPointSize(4); }
         glBegin(GL_POINTS); glVertex3f(p.x, p.y, p.z); glEnd();
     }
     glEnable(GL_LIGHTING);
@@ -247,7 +271,9 @@ void drawText(float x, float y, const char* s) {
     for (; *s; s++) glutBitmapCharacter(GLUT_BITMAP_HELVETICA_12, *s);
 }
 
+// Screen likha
 void drawOverlay() {
+    float k = prog();
     glDisable(GL_LIGHTING); glDisable(GL_DEPTH_TEST);
     glMatrixMode(GL_PROJECTION); glPushMatrix(); glLoadIdentity(); gluOrtho2D(0, winW, 0, winH);
     glMatrixMode(GL_MODELVIEW); glPushMatrix(); glLoadIdentity();
@@ -257,28 +283,41 @@ void drawOverlay() {
     sprintf(buf, "DisasterScape | %s | t = %.1fs %s", names[current], simTime, paused ? "(paused)" : "");
     glColor3f(1, 1, 1);
     drawText(10, winH - 18, buf);
-    drawText(10, winH - 36, "1 Flood  2 Earthquake  0/R Reset  Space Pause  Arrows Rotate  +/- Zoom");
+    drawText(10, winH - 36, "1 Flood  2 Earthquake  3 Drought  0/R Reset  Space Pause  Arrows Rotate  +/- Zoom");
     glPopMatrix(); glMatrixMode(GL_PROJECTION); glPopMatrix(); glMatrixMode(GL_MODELVIEW);
     glEnable(GL_DEPTH_TEST); glEnable(GL_LIGHTING);
 }
 
 // ---------- simulation update ----------
 void updateSim(float dt) {
+    float k = prog();
+
+    // FLOOD: bristir particle portese
     if (current == FLOOD) {
         for (int i = 0; i < 12; i++)
             addP(RAIN, frand(-40, 40), 30, frand(-40, 40), -2.0f, -frand(25, 32), 0, 1, 0);
     }
+
+    // EARTHQUAKE: building theke debris pore.
     if (current == EARTHQUAKE && simTime > 2) {
         for (int i = 0; i < NB; i++)
             if (rand() % 5 == 0)
                 addP(DEBRIS, blds[i].x + frand(-blds[i].w / 2, blds[i].w / 2), blds[i].h * frand(0.6f, 1.0f), blds[i].z + blds[i].d / 2,
                      frand(-1, 1), 0, frand(0, 1.5f), 1, 5);
     }
+
+    // DROUGHT: gach theke shukno pata pore.
+    if (current == DROUGHT && frand(0, 1) < 0.2f * k) {
+        int t = rand() % NT;
+        addP(LEAF, treePos[t][0] + frand(-1.5f, 1.5f), frand(3, 5), treePos[t][1] + frand(-1.5f, 1.5f), 0, -1.2f, 0, 1, 4);
+    }
+
     for (size_t i = 0; i < parts.size(); i++) {
         Particle& p = parts[i];
         if (p.type == DEBRIS) p.vy -= 15 * dt;
+        if (p.type == LEAF) p.vx = sinf(p.y * 2 + i) * 1.2f;
         p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt;
-        float decay = (p.type == DEBRIS) ? 0.25f : 0;
+        float decay = p.type == DEBRIS ? 0.25f : p.type == LEAF ? 0.12f : 0;
         p.life -= decay * dt;
     }
     parts.erase(remove_if(parts.begin(), parts.end(),
@@ -289,21 +328,24 @@ void updateSim(float dt) {
 void display() {
     float k = (current == NORMAL) ? 0 : prog();
     float sr = 0.53f, sg = 0.81f, sb = 0.92f, tr = sr, tg = sg, tb = sb;
-    if (current == FLOOD) { tr = 0.41f; tg = 0.45f; tb = 0.52f; }
+    switch (current) {
+        case FLOOD: tr = 0.41f; tg = 0.45f; tb = 0.52f; break;
+        case DROUGHT: tr = 0.93f; tg = 0.85f; tb = 0.63f; break;
+        default: break;
+    }
     glClearColor(lerpf(sr, tr, k), lerpf(sg, tg, k), lerpf(sb, tb, k), 1);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     glMatrixMode(GL_MODELVIEW); glLoadIdentity();
     float sx = 0, sy = 0;
+    // EARTHQUAKE: camera shake.
     if (current == EARTHQUAKE) { float a = clamp01(simTime / 6) * 0.4f; sx = frand(-1, 1) * a; sy = frand(-1, 1) * a; }
     float rad = camAngle * PI / 180;
     gluLookAt(camDist * sinf(rad) + sx, camHeight + sy, camDist * cosf(rad), 0, 3, 0, 0, 1, 0);
-
     float li = (current == FLOOD) ? lerpf(1.0f, 0.55f, k) : 1.0f;
     GLfloat lp[] = {20, 40, 20, 0}, diff[] = {li, li, li, 1}, amb[] = {0.35f, 0.35f, 0.35f, 1};
     glLightfv(GL_LIGHT0, GL_POSITION, lp);
     glLightfv(GL_LIGHT0, GL_DIFFUSE, diff);
     glLightfv(GL_LIGHT0, GL_AMBIENT, amb);
-
     drawSun();
     drawClouds();
     drawGround();
@@ -320,9 +362,10 @@ void display() {
 void timer(int) {
     const float dt = 0.016f;
     if (!paused) {
-        float sp = (current == FLOOD) ? 2.5f : 0.6f;
+        float sp = current == FLOOD ? 2.5f : 0.6f;
         cloudOff += sp * dt;
         if (current != NORMAL) { simTime += dt; updateSim(dt); }
+        flashAmt = max(0.0f, flashAmt - dt * 3);
     }
     glutPostRedisplay();
     glutTimerFunc(16, timer, 0);
@@ -334,6 +377,7 @@ void keyboard(unsigned char key, int, int) {
     switch (key) {
         case '1': setMode(FLOOD); break;
         case '2': setMode(EARTHQUAKE); break;
+        case '3': setMode(DROUGHT); break;
         case '0': case 'r': case 'R': setMode(NORMAL); break;
         case ' ': paused = !paused; break;
         case '+': case '=': camDist = max(15.0f, camDist - 2); break;
