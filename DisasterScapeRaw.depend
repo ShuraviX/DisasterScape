@@ -1,0 +1,33 @@
+# depslib dependency file v1.0
+1794843508 source:c:\users\hp\documents\disasterscaperaw\main.cpp
+	<GL/freeglut.h>
+	<cmath>
+	<cstdio>
+	<cstdlib>
+	<ctime>
+	<vector>
+	<algorithm>
+
+1794838040 c:\freeglut-mingw-3.8.0\freeglut\include\gl\freeglut.h
+	"freeglut_std.h"
+	"freeglut_ext.h"
+
+1794838040 c:\freeglut-mingw-3.8.0\freeglut\include\gl\freeglut_std.h
+	<windows.h>
+	<EGL/egl.h>
+	<GLES/gl.h>
+	<GLES2/gl2.h>
+	<OpenGL/gl.h>
+	<OpenGL/glu.h>
+	<GL/gl.h>
+	<GL/glu.h>
+	<stdlib.h>
+
+1794838040 c:\freeglut-mingw-3.8.0\freeglut\include\gl\freeglut_ext.h
+	<stdarg.h>
+	"freeglut_ucall.h"
+
+1794838040 c:\freeglut-mingw-3.8.0\freeglut\include\gl\freeglut_ucall.h
+	<stdarg.h>
+	<stdlib.h>
+
